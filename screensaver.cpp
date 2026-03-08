@@ -1,4 +1,4 @@
-﻿// screensaver.cpp
+// screensaver.cpp
 // miniblink screensaver - supports /s /c /p
 // Build: g++ screensaver.cpp -I. -o screensaver.scr -luser32 -lcomdlg32 -mwindows
 // Deploy: copy screensaver.scr + mb132_x64.dll to C:\Windows\System32
@@ -377,15 +377,9 @@ LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(g_mouseHook, nCode, wParam, lParam);
 }
 
-// -------------------------------------------------------
-// Loading finish callback - go fullscreen borderless
-// -------------------------------------------------------
-void MB_CALL_TYPE onLoadingFinish(
-    mbWebView webView, void* param, void* frame,
-    const utf8* url, mbLoadingResult result, const utf8* failedReason)
+static void ApplyFullscreenBeforeLoad(mbWebView webView)
 {
-    if (g_preview) return;
-    if (result != MB_LOADING_SUCCEEDED) return;
+    if (!webView || g_preview) return;
 
     HWND hwnd = mbGetHostHWND(webView);
     if (!hwnd) return;
@@ -407,6 +401,18 @@ void MB_CALL_TYPE onLoadingFinish(
     EnableWindow(hwnd, TRUE);
     SetWindowPos(hwnd, HWND_TOP, 0, 0, sw, sh, SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     mbResize(webView, sw, sh);
+}
+
+// -------------------------------------------------------
+// Loading finish callback - keep focus after document load
+// -------------------------------------------------------
+void MB_CALL_TYPE onLoadingFinish(
+    mbWebView webView, void* param, void* frame,
+    const utf8* url, mbLoadingResult result, const utf8* failedReason)
+{
+    if (g_preview) return;
+    if (result != MB_LOADING_SUCCEEDED) return;
+
     FocusWebViewWindow();
 }
 
@@ -603,11 +609,11 @@ void RunScreensaver()
     mbOnLoadingFinish(g_view, onLoadingFinish, nullptr);
     mbSetCookieEnabled(g_view, true);
 
-    LoadConfiguredUrl(g_view);
-
+    ApplyFullscreenBeforeLoad(g_view);
     mbShowWindow(g_view, TRUE);
     AttachHostWindowProc();
     FocusWebViewWindow();
+    LoadConfiguredUrl(g_view);
 
     // System screensaver behavior: hide cursor and place it at screen center.
     HideCursorIfNeeded();
@@ -728,11 +734,11 @@ void RunDirect()
     mbOnLoadingFinish(g_view, onLoadingFinish, nullptr);
     mbSetCookieEnabled(g_view, true);
 
-    LoadConfiguredUrl(g_view);
-
+    ApplyFullscreenBeforeLoad(g_view);
     mbShowWindow(g_view, TRUE);
     AttachHostWindowProc();
     FocusWebViewWindow();
+    LoadConfiguredUrl(g_view);
 
     mbRunMessageLoop();
     CleanupRuntime(false);
