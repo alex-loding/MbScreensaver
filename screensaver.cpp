@@ -38,11 +38,25 @@ static WNDPROC   g_hostProc  = NULL;
 static bool      g_exitAsked = false;
 static bool      g_cursorHidden = false;
 static bool      g_escOnly = false;
+static bool      g_revealOnFirstMainLoad = false;
 
 static void AttachHostWindowProc();
 static void CleanupRuntime(bool restoreCursor);
 static bool RegWriteUrl(const std::wstring& url);
 static void FocusWebViewWindow();
+
+static void HideWindowUntilUrlLoaded(mbWebView webView)
+{
+    if (!webView) return;
+    g_revealOnFirstMainLoad = true;
+
+    mbShowWindow(webView, FALSE);
+
+    HWND hwnd = mbGetHostHWND(webView);
+    if (hwnd && IsWindow(hwnd)) {
+        ShowWindow(hwnd, SW_HIDE);
+    }
+}
 
 static void HideCursorIfNeeded()
 {
@@ -168,6 +182,7 @@ static void CleanupRuntime(bool restoreCursor)
     g_lastMouse.x = -1;
     g_lastMouse.y = -1;
     g_exitAsked = false;
+    g_revealOnFirstMainLoad = false;
 }
 // -------------------------------------------------------
 static std::wstring GetDefaultUrl()
@@ -388,7 +403,7 @@ static void ApplyFullscreenBeforeLoad(mbWebView webView)
     int sh = GetSystemMetrics(SM_CYSCREEN);
 
     LONG style = GetWindowLong(hwnd, GWL_STYLE);
-    style |= (WS_POPUP | WS_VISIBLE);
+    style |= WS_POPUP;
     style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
     SetWindowLong(hwnd, GWL_STYLE, style);
 
@@ -399,7 +414,7 @@ static void ApplyFullscreenBeforeLoad(mbWebView webView)
     // Use normal top z-order to avoid native popup controls (e.g. <select>) being
     // obscured by a forced topmost host window.
     EnableWindow(hwnd, TRUE);
-    SetWindowPos(hwnd, HWND_TOP, 0, 0, sw, sh, SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+    SetWindowPos(hwnd, HWND_TOP, 0, 0, sw, sh, SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
     mbResize(webView, sw, sh);
 }
 
@@ -407,13 +422,26 @@ static void ApplyFullscreenBeforeLoad(mbWebView webView)
 // Loading finish callback - keep focus after document load
 // -------------------------------------------------------
 void MB_CALL_TYPE onLoadingFinish(
-    mbWebView webView, void* param, void* frame,
+    mbWebView webView, void* param, mbWebFrameHandle frameId,
     const utf8* url, mbLoadingResult result, const utf8* failedReason)
 {
-    if (g_preview) return;
-    if (result != MB_LOADING_SUCCEEDED) return;
+    if (frameId && !mbIsMainFrame(webView, frameId)) return;
+    if (result == MB_LOADING_CANCELED) return;
 
-    FocusWebViewWindow();
+    if (g_revealOnFirstMainLoad) {
+        g_revealOnFirstMainLoad = false;
+        mbShowWindow(webView, TRUE);
+
+        HWND hwnd = mbGetHostHWND(webView);
+        if (hwnd && IsWindow(hwnd)) {
+            ShowWindow(hwnd, SW_SHOW);
+            UpdateWindow(hwnd);
+        }
+    }
+
+    if (!g_preview) {
+        FocusWebViewWindow();
+    }
 }
 
 // -------------------------------------------------------
@@ -602,7 +630,7 @@ void RunScreensaver()
 
     g_view = mbCreateWebCustomWindow(
         NULL,
-        WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
         WS_EX_APPWINDOW,
         0, 0, sw, sh
     );
@@ -610,9 +638,8 @@ void RunScreensaver()
     mbSetCookieEnabled(g_view, true);
 
     ApplyFullscreenBeforeLoad(g_view);
-    mbShowWindow(g_view, TRUE);
+    HideWindowUntilUrlLoaded(g_view);
     AttachHostWindowProc();
-    FocusWebViewWindow();
     LoadConfiguredUrl(g_view);
 
     // System screensaver behavior: hide cursor and place it at screen center.
@@ -649,15 +676,16 @@ void RunPreview(HWND hwndPreview)
     HWND hwndMb = mbGetHostHWND(g_view);
     if (hwndMb) {
         SetParent(hwndMb, hwndPreview);
-        SetWindowLong(hwndMb, GWL_STYLE, WS_CHILD | WS_VISIBLE);
+        SetWindowLong(hwndMb, GWL_STYLE, WS_CHILD);
         SetWindowPos(hwndMb, NULL, 0, 0, w, h, SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 
+    mbOnLoadingFinish(g_view, onLoadingFinish, nullptr);
     mbSetCookieEnabled(g_view, true);
 
+    HideWindowUntilUrlLoaded(g_view);
     LoadConfiguredUrl(g_view);
 
-    mbShowWindow(g_view, TRUE);
     AttachHostWindowProc();
     mbRunMessageLoop();
 
@@ -727,7 +755,7 @@ void RunDirect()
 
     g_view = mbCreateWebCustomWindow(
         NULL,
-        WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
         WS_EX_APPWINDOW,
         0, 0, sw, sh
     );
@@ -735,9 +763,8 @@ void RunDirect()
     mbSetCookieEnabled(g_view, true);
 
     ApplyFullscreenBeforeLoad(g_view);
-    mbShowWindow(g_view, TRUE);
+    HideWindowUntilUrlLoaded(g_view);
     AttachHostWindowProc();
-    FocusWebViewWindow();
     LoadConfiguredUrl(g_view);
 
     mbRunMessageLoop();
